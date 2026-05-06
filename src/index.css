@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+    --background: #050f1a;
+    --card: #0a1929;
+    --border: #1a3a5c;
+    --teal: #0d9488;
+    --cyan: #06b6d4;
+    --gold: #d4af37;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: var(--background);
+    color: #e2e8f0;
+    font-family: 'DM Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'Syne', sans-serif;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--background); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+}
+
+@layer utilities {
+  .glass {
+    background: rgba(10, 25, 41, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(26, 58, 92, 0.6);
+  }
+
+  .glow-teal {
+    box-shadow: 0 0 20px rgba(13, 148, 136, 0.3);
+  }
+
+  .glow-gold {
+    box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
+  }
+
+  .gradient-teal {
+    background: linear-gradient(135deg, #0d9488, #06b6d4);
+  }
+
+  .gradient-gold {
+    background: linear-gradient(135deg, #d4af37, #f59e0b);
+  }
+
+  .text-gradient-teal {
+    background: linear-gradient(135deg, #0d9488, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-gold {
+    background: linear-gradient(135deg, #d4af37, #f59e0b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .card-dark {
+    background: #0a1929;
+    border: 1px solid #1a3a5c;
+    border-radius: var(--radius);
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.04) 50%, transparent 75%);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+}
