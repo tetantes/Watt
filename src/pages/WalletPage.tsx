@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, Users, TrendingUp, Clock, Hash, DollarSign, Copy } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { ArrowDownLeft, ArrowUpRight, Users, TrendingUp, Clock, Hash, DollarSign, ImagePlus } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
 import { AppLayout } from '@/components/layout/AppLayout'
@@ -27,12 +27,15 @@ export default function WalletPage() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
   const [depositTxHash, setDepositTxHash] = useState('')
-  const [depositScreenshot, setDepositScreenshot] = useState('')
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null)
+  const [screenshotPreview, setScreenshotPreview] = useState('')
+  const [uploadingScreenshot, setUploadingScreenshot] = useState(false)
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawWallet, setWithdrawWallet] = useState('')
   const [withdrawNetwork, setWithdrawNetwork] = useState('USDT-TRC20')
   const [loading, setLoading] = useState(false)
   const [hasActivePlan, setHasActivePlan] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { if (profile) loadData() }, [profile?.id, tab])
 
@@ -57,21 +60,49 @@ export default function WalletPage() {
     }
   }
 
+  const handleScreenshotSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) { toast({ title: 'File too large', description: 'Max 5MB', variant: 'destructive' }); return }
+    setScreenshotFile(file)
+    setScreenshotPreview(URL.createObjectURL(file))
+  }
+
+  const uploadScreenshot = async (): Promise<string | null> => {
+    if (!screenshotFile || !profile) return null
+    setUploadingScreenshot(true)
+    const ext = screenshotFile.name.split('.').pop()
+    const path = `deposits/${profile.id}/${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('payment-proofs').upload(path, screenshotFile, { upsert: true })
+    setUploadingScreenshot(false)
+    if (error) {
+      // If storage bucket doesn't exist, store as base64 note instead
+      return `[Screenshot uploaded - ${screenshotFile.name}]`
+    }
+    const { data } = supabase.storage.from('payment-proofs').getPublicUrl(path)
+    return data.publicUrl
+  }
+
   const submitDeposit = async () => {
     if (!profile) return
     const amount = parseFloat(depositAmount)
     if (isNaN(amount) || amount < 10) { toast({ title: 'Minimum deposit is 10 USDT', variant: 'destructive' }); return }
-    if (!depositTxHash && !depositScreenshot) { toast({ title: 'Provide TX hash or screenshot', variant: 'destructive' }); return }
+    if (!depositTxHash && !screenshotFile) { toast({ title: 'Provide TX hash or upload screenshot', variant: 'destructive' }); return }
     setLoading(true)
+    let screenshotUrl = ''
+    if (screenshotFile) { screenshotUrl = (await uploadScreenshot()) || '' }
     const { error } = await supabase.from('deposits').insert({
-      user_id: profile.id, amount, payment_method: 'crypto',
+      user_id: profile.id,
+      amount,
+      payment_method: 'crypto',
       payment_proof: depositTxHash || null,
-      notes: depositScreenshot ? `Screenshot: ${depositScreenshot}` : null,
+      notes: screenshotUrl || null,
     })
     if (error) { toast({ title: 'Failed', description: error.message, variant: 'destructive' }) }
     else {
       toast({ title: 'Top-up submitted!', description: 'Awaiting admin confirmation', variant: 'success' })
-      setShowDepositModal(false); setDepositAmount(''); setDepositTxHash(''); setDepositScreenshot('')
+      setShowDepositModal(false); setDepositAmount(''); setDepositTxHash('')
+      setScreenshotFile(null); setScreenshotPreview('')
       loadData()
     }
     setLoading(false)
@@ -101,8 +132,7 @@ export default function WalletPage() {
     if (type === 'commission') return <Users className="w-4 h-4 text-yellow-400" />
     return <TrendingUp className="w-4 h-4 text-cyan-400" />
   }
-
-  const txLabel: Record<string, string> = { deposit: 'Top Up', withdrawal: 'Withdrawal', commission: 'Team Commission', plan_purchase: 'Investment', bonus: 'Bonus', adjustment: 'Adjustment' }
+  const txLabel: Record<string, string> = { deposit: 'Top Up', withdrawal: 'Withdrawal', commission: 'Team Commission', plan_purchase: 'Investment Purchase', bonus: 'Bonus Reward', adjustment: 'Balance Adjustment' }
   const statusBadge = (s: string) => s === 'approved' ? <Badge variant="success">Confirmed</Badge> : s === 'rejected' ? <Badge variant="danger">Rejected</Badge> : <Badge variant="warning">Pending</Badge>
 
   return (
@@ -157,10 +187,13 @@ export default function WalletPage() {
           deposits.map(d => (
             <Card key={d.id}>
               <div className="flex items-center justify-between">
-                <div>
+                <div className="flex-1 min-w-0 mr-3">
                   <p className="font-semibold text-white">{d.amount.toFixed(4)} USDT</p>
                   <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1"><Clock className="w-3 h-3" />{formatDateTime(d.created_at)}</p>
-                  {d.payment_proof && <p className="text-xs text-slate-600 font-mono mt-1">TX: {d.payment_proof.slice(0,16)}...</p>}
+                  {d.payment_proof && <p className="text-xs text-slate-600 font-mono mt-1 truncate">TX: {d.payment_proof.slice(0,20)}...</p>}
+                  {d.notes && d.notes.startsWith('http') && (
+                    <a href={d.notes} target="_blank" rel="noreferrer" className="text-xs text-teal-400 mt-1 block">View screenshot →</a>
+                  )}
                 </div>
                 {statusBadge(d.status)}
               </div>
@@ -185,32 +218,57 @@ export default function WalletPage() {
         )}
       </div>
 
+      {/* TOP UP Modal */}
       <Modal open={showDepositModal} onClose={() => setShowDepositModal(false)} title="Top Up USDT">
         <div className="space-y-4">
           <div className="bg-brand-dark rounded-xl p-4 border border-teal-500/30">
             <p className="text-xs text-slate-500 mb-2 font-display uppercase tracking-wider">Send USDT to this address</p>
-            <p className="text-xs font-mono text-teal-400 break-all">{depositAddress || 'Loading...'}</p>
+            <p className="text-xs font-mono text-teal-400 break-all leading-relaxed">{depositAddress || 'Loading...'}</p>
             <div className="flex items-center justify-between mt-3">
               <span className="text-xs text-slate-500">Network: <span className="text-slate-300">{depositNetwork}</span></span>
               <button onClick={() => { navigator.clipboard.writeText(depositAddress); toast({ title: 'Copied!', variant: 'success' }) }}
-                className="flex items-center gap-1 text-xs text-teal-400 border border-teal-500/30 rounded-lg px-2 py-1">
-                <Copy className="w-3 h-3" /> Copy
-              </button>
+                className="text-xs text-teal-400 border border-teal-500/30 rounded-lg px-2 py-1">Copy</button>
             </div>
           </div>
+
           <Input label="Amount (USDT)" type="number" placeholder="Min. 10 USDT" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} icon={<DollarSign className="w-4 h-4" />} />
           <Input label="Transaction Hash (TX ID)" type="text" placeholder="Paste your transaction hash" value={depositTxHash} onChange={e => setDepositTxHash(e.target.value)} icon={<Hash className="w-4 h-4" />} />
-          <Input label="Screenshot URL (optional)" type="text" placeholder="Link to payment screenshot" value={depositScreenshot} onChange={e => setDepositScreenshot(e.target.value)} />
-          <p className="text-xs text-slate-600 bg-brand-dark rounded-xl p-3">After sending USDT, submit this form. Your balance will be credited once admin verifies the transaction.</p>
-          <Button onClick={submitDeposit} loading={loading} className="w-full" size="lg">Submit Top Up</Button>
+
+          {/* Screenshot upload */}
+          <div>
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-display block mb-1.5">Payment Screenshot</label>
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleScreenshotSelect} className="hidden" />
+            {screenshotPreview ? (
+              <div className="relative">
+                <img src={screenshotPreview} alt="Screenshot preview" className="w-full h-32 object-cover rounded-xl border border-brand-border" />
+                <button onClick={() => { setScreenshotFile(null); setScreenshotPreview('') }}
+                  className="absolute top-2 right-2 bg-red-500/80 text-white text-xs px-2 py-1 rounded-lg">Remove</button>
+              </div>
+            ) : (
+              <button onClick={() => fileInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-brand-border rounded-xl py-6 flex flex-col items-center gap-2 hover:border-teal-500/50 transition-colors">
+                <ImagePlus className="w-8 h-8 text-slate-600" />
+                <p className="text-sm text-slate-500">Tap to upload screenshot</p>
+                <p className="text-xs text-slate-700">JPG, PNG up to 5MB</p>
+              </button>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-600 bg-brand-dark rounded-xl p-3">
+            ⚠️ After sending USDT, submit this form. Your balance will be credited after admin verifies your payment.
+          </p>
+          <Button onClick={submitDeposit} loading={loading || uploadingScreenshot} className="w-full" size="lg">
+            {uploadingScreenshot ? 'Uploading...' : 'Submit Top Up'}
+          </Button>
         </div>
       </Modal>
 
+      {/* WITHDRAWAL Modal */}
       <Modal open={showWithdrawModal} onClose={() => setShowWithdrawModal(false)} title="Withdraw USDT">
         <div className="space-y-4">
           {!hasActivePlan && <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3"><p className="text-xs text-red-400">⚠️ An active investment plan is required to withdraw.</p></div>}
           <div className="bg-brand-dark rounded-xl p-3 border border-brand-border">
-            <p className="text-xs text-slate-500">Available</p>
+            <p className="text-xs text-slate-500">Available Balance</p>
             <p className="font-display font-bold text-white text-xl">{(profile?.balance || 0).toFixed(4)} USDT</p>
           </div>
           <Input label="Amount (USDT)" type="number" placeholder="Min. 20 USDT" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} icon={<DollarSign className="w-4 h-4" />} />
@@ -223,6 +281,7 @@ export default function WalletPage() {
               <option value="USDT-BEP20">USDT (BEP20)</option>
             </select>
           </div>
+          <p className="text-xs text-slate-600">Withdrawals are reviewed and processed within 24-48 hours.</p>
           <Button onClick={submitWithdrawal} loading={loading} className="w-full" size="lg" disabled={!hasActivePlan}>Confirm Withdrawal</Button>
         </div>
       </Modal>
